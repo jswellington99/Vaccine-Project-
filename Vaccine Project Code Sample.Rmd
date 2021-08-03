@@ -1,0 +1,218 @@
+---
+title: "Vaccine Project Code Sample"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=F}
+library(data.table)
+library(knitr)
+library(tidyverse)
+library(dplyr)
+library(bnlearn)
+library(ggplot2)
+library(Amelia)
+library(corrplot)
+library(corrgram)
+library(leaps)
+library(MASS)
+library(caret)
+library(psych)
+```
+
+```{r}
+fludata <- fread("/Users/jordanwellington/Desktop/spezio/adultflu.csv", data.table = F)
+```
+```{r}
+cvacdata <- fread("/Users/jordanwellington/Desktop/spezio/CVAC.csv", data.table = F)
+```
+```{r}
+coviddata <- fread("/Users/jordanwellington/Desktop/spezio/covidvax.csv", data.table = F)
+```
+
+```{r}
+#redefining flu data to have factor variables and reassigning 0s and 1s to flu data:
+fludata$FLUSHOT6 <- as.numeric(fludata$FLUSHOT6)
+fludata$Year <- as.factor(fludata$Year)
+fludata$FIPS <- as.factor(fludata$FIPS)
+fludata$county <- as.factor(fludata$county)
+fludata$state <- as.factor(fludata$state)
+fludata$FLUSHOT6[fludata$FLUSHOT6 == 2] <- 0
+fludata$FLUSHOT6 <- as.numeric(fludata$FLUSHOT6)
+```
+
+
+```{r}
+#creating a new data set where each FIPS number is an observation, and the total count of 1s and 1s + 0s (all vaccinated over vaccinated plus not vaccinated) are the other variables
+fludata1 <- fludata %>% dplyr::group_by(FIPS) %>% summarise(state = state, county = county, count1 = sum(FLUSHOT6 == 1), count2 = sum(FLUSHOT6 == 1 |FLUSHOT6 == 0), percentflu = (count1/count2)*100)
+fludata1 <- fludata1 %>% distinct()
+```
+
+```{r}
+#create data set for Flu without 3s and 4s - so this data frame only has people who said yes or no to flu vaccine
+fludataYesNo <- fludata %>% filter(FLUSHOT6 == 0 | FLUSHOT6 == 1)
+```
+
+```{r}
+#create flu df by FIPS with each year count
+flusumyear <- fludataYesNo %>% group_by(FIPS) %>% summarise(state = state, county = county, '2009' = sum(Year == "2009"), '2010' = sum(Year == "2010"),'2011' = sum(Year == "2011"),'2012' = sum(Year == "2012"),'2013' = sum(Year == "2013"),'2014' = sum(Year == "2014"),'2015' = sum(Year == "2015"),'2016' = sum(Year == "2016"),'2017' = sum(Year == "2017"))
+flusumyear <- flusumyear %>% distinct()
+```
+
+```{r}
+#select only FIPS number and percent with flu vaccine
+fludata1 <- fludata1 %>% dplyr::select(FIPS, percentflu)
+```
+
+```{r}
+#take rows of interest in covid data, for now just percent of total pop fully vaccinated
+coviddata1 <- coviddata %>% dplyr::select(FIPS, `Percent of Total Pop Fully Vaccinated - Resident`, `Percent of 18+ Pop Fully Vaccinated - Resident`, `Percent of 65+ Pop Fully Vaccinated - Resident`)
+```
+
+```{r}
+#rows of interest in cvac data:
+cvacdata1 <- cvacdata %>% dplyr::select(FIPS, Th1_Historic_Undervaccination, Th2_Sociodemographic_Barriers, Th3_Resource_constrained_Healthcare_System,Th4_Healthcare_Accessibility_Barriers,Th5_Irregular_Care_Seeking_Behavior, CVAC)
+```
+
+```{r}
+#merging flu, cvac, and covid sets by FIPS number
+comp <- merge(fludata1, coviddata1, by="FIPS")
+comp <- merge(comp, cvacdata1, by= "FIPS")
+```
+
+```{r}
+#plotting the data before scaled 
+comp %>%
+  ggplot(aes(percentflu, `Percent of Total Pop Fully Vaccinated - Resident`)) + geom_point() + xlim(0,70)
+# plot for flu and 18+ covid percent
+comp %>%
+  ggplot(aes(percentflu, `Percent of 18+ Pop Fully Vaccinated - Resident`)) + geom_point()
+# plot for flu and 65+ covid percent
+comp %>%
+  ggplot(aes(percentflu, `Percent of 65+ Pop Fully Vaccinated - Resident`)) + geom_point()
+```
+
+```{r}
+#linear regression for total covid percent with unscaled predictors
+linreg <- lm(`Percent of Total Pop Fully Vaccinated - Resident` ~ . - FIPS - `Percent of 18+ Pop Fully Vaccinated - Resident` - `Percent of 65+ Pop Fully Vaccinated - Resident`, data = comp)
+summary(linreg)
+```
+
+```{r}
+#CVAC histograms TH1 not scaled
+cvacdata %>%
+  ggplot(aes(Th1_Historic_Undervaccination)) + geom_histogram(binwidth = .01, color = 'blue')
+cvacdata %>%
+  ggplot(aes(Th2_Sociodemographic_Barriers)) + geom_histogram(binwidth = .01, color = 'blue')
+cvacdata %>%
+  ggplot(aes(Th3_Resource_constrained_Healthcare_System)) + geom_histogram(binwidth = .01, color = 'blue')
+cvacdata %>%
+  ggplot(aes(Th4_Healthcare_Accessibility_Barriers)) + geom_histogram(binwidth = .01, color = 'blue')
+cvacdata %>%
+  ggplot(aes(Th5_Irregular_Care_Seeking_Behavior)) + geom_histogram(binwidth = .01, color = 'blue')
+cvacdata %>%
+  ggplot(aes(CVAC)) + geom_histogram(binwidth = .01, color = 'blue')
+```
+
+```{r}
+# standardizing cvac1 data experimenting
+mean1 <- mean(cvacdata$Th1_Historic_Undervaccination)
+sd1 <- sd(cvacdata$Th1_Historic_Undervaccination)
+scaledcvac1 <- scale(cvacdata$Th1_Historic_Undervaccination)
+scaled <- as.data.frame(scaledcvac1)
+scaled %>% ggplot(aes(V1)) + geom_histogram(binwidth = .01, color = 'blue')
+colMeans(scaled)
+mean(scaled$V1)
+sd(scaled$V1)
+```
+
+```{r}
+#create new df for scaled predictors
+comp1 <- comp %>% summarise(FIPS = FIPS, flu = scale(percentflu), Th1_Historic_Undervaccination = scale(Th1_Historic_Undervaccination), Th2_Sociodemographic_Barriers = scale(Th2_Sociodemographic_Barriers), Th3_Resource_constrained_Healthcare_System = scale(Th3_Resource_constrained_Healthcare_System), Th4_Healthcare_Accessibility_Barriers = scale(Th4_Healthcare_Accessibility_Barriers), Th5_Irregular_Care_Seeking_Behavior = scale(Th5_Irregular_Care_Seeking_Behavior), CVAC = scale(CVAC), `Percent of Total Pop Fully Vaccinated - Resident`, `Percent of 65+ Pop Fully Vaccinated - Resident`, `Percent of 18+ Pop Fully Vaccinated - Resident`)
+```
+
+```{r}
+#plotting the data after scaled
+comp1 %>%
+  ggplot(aes(flu, `Percent of Total Pop Fully Vaccinated - Resident`)) + geom_point()
+# plot for flu and 18+ covid percent
+comp1 %>%
+  ggplot(aes(flu, `Percent of 18+ Pop Fully Vaccinated - Resident`)) + geom_point()
+# plot for flu and 65+ covid percent
+comp1 %>%
+  ggplot(aes(flu, `Percent of 65+ Pop Fully Vaccinated - Resident`)) + geom_point()
+```
+
+```{r}
+#new predictor histograms, scaled
+comp1 %>%
+  ggplot(aes(Th1_Historic_Undervaccination)) + geom_histogram(binwidth = .1, color = 'blue')
+comp1 %>%
+  ggplot(aes(Th2_Sociodemographic_Barriers)) + geom_histogram(binwidth = .1, color = 'blue')
+comp1 %>%
+  ggplot(aes(Th3_Resource_constrained_Healthcare_System)) + geom_histogram(binwidth = .1, color = 'blue')
+comp1 %>%
+  ggplot(aes(Th4_Healthcare_Accessibility_Barriers)) + geom_histogram(binwidth = .1, color = 'blue')
+comp1 %>%
+  ggplot(aes(Th5_Irregular_Care_Seeking_Behavior)) + geom_histogram(binwidth = .1, color = 'blue')
+comp1 %>%
+  ggplot(aes(CVAC)) + geom_histogram(binwidth = .1, color = 'blue')
+comp1 %>%
+  ggplot(aes(flu)) + geom_histogram(binwidth = .1, color = 'blue')
+```
+
+```{r}
+#regular linear regression for total covid percent after scaling predictors
+linreg <- lm(log(`Percent of Total Pop Fully Vaccinated - Resident`) ~ . - FIPS - `Percent of 18+ Pop Fully Vaccinated - Resident` - `Percent of 65+ Pop Fully Vaccinated - Resident`, data = comp1)
+summary(linreg)
+car::vif(linreg)
+```
+
+```{r}
+#take all numerical variables in comp1, took out FIPS and dependent variables; run Spearman correlation test on all the predictor; use spearman bc data not normal
+data.num <- comp1 %>% dplyr::select(-c(FIPS,'Percent of Total Pop Fully Vaccinated - Resident', 'Percent of 65+ Pop Fully Vaccinated - Resident', 'Percent of 18+ Pop Fully Vaccinated - Resident'))
+corr.test(data.num, use = "pairwise", method = "spearman", adjust = "none")
+```
+
+```{r}
+#stepwise regression of scaled vars
+linreg <- lm(`Percent of Total Pop Fully Vaccinated - Resident` ~ . - FIPS - `Percent of 18+ Pop Fully Vaccinated - Resident` - `Percent of 65+ Pop Fully Vaccinated - Resident`, data = comp1)
+step.model <- stepAIC(linreg, direction = "both", trace = F)
+summary(step.model)
+car::vif(step.model)
+```
+
+```{r}
+# VIF function for original scaled lin reg model,
+#VIF for step model much better, still values over 2 for all of the cvac scores 
+car::vif(linreg)
+car::vif(step.model)
+```
+
+```{r}
+# linear model without Th4 or CVAC, has best VIF and all good pvalues
+linregwo4c <- lm(`Percent of Total Pop Fully Vaccinated - Resident` ~ . - FIPS - `Percent of 18+ Pop Fully Vaccinated - Resident` - `Percent of 65+ Pop Fully Vaccinated - Resident` - CVAC - Th4_Healthcare_Accessibility_Barriers, data = comp1)
+summary(linregwo4c)
+car::vif(linregwo4c)
+```
+
+```{r}
+# linear model without Th2 or CVAC
+linregwo2c <- lm(`Percent of Total Pop Fully Vaccinated - Resident` ~ . - FIPS - `Percent of 18+ Pop Fully Vaccinated - Resident` - `Percent of 65+ Pop Fully Vaccinated - Resident` - CVAC - Th2_Sociodemographic_Barriers, data = comp1)
+summary(linregwo2c)
+car::vif(linregwo2c)
+```
+
+```{r}
+#checking just flu, cvac, and th2 or th4; leads to low R^2
+linregcvacflu <- lm(`Percent of Total Pop Fully Vaccinated - Resident` ~flu + CVAC + Th2_Sociodemographic_Barriers, data = comp1)
+summary(linregcvacflu)
+car::vif(linregcvacflu)
+```
+
